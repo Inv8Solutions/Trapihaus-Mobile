@@ -25,6 +25,12 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Splash screen
+
+- Replace `assets/images/splash-icon.png` with your Trapihaus splash logo (ideally a transparent PNG, white mark).
+- Splash background color is configured in `app.json` via the `expo-splash-screen` plugin.
+- After changing splash assets/config, restart the dev server (and rebuild a dev client if you’re using one).
+
 ## Get a fresh project
 
 When you're ready, run:
