@@ -2,18 +2,22 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import { AuthTextInput } from "@/components/auth/auth-text-input";
 import { SocialAuthRow } from "@/components/auth/social-auth-row";
+import { useAuth } from "@/context/auth-context";
 
 const COLORS = {
   bg: "#FFFFFF",
@@ -25,8 +29,11 @@ const COLORS = {
 };
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
+  const { signInWithAdmin } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const isValid = useMemo(
     () => email.trim().length > 0 && password.length > 0,
@@ -41,7 +48,10 @@ export default function LoginScreen() {
         keyboardVerticalOffset={Platform.select({ ios: 8, android: 0 })}
       >
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingTop: insets.top + 10 },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -91,9 +101,14 @@ export default function LoginScreen() {
               accessibilityRole="button"
               accessibilityLabel="Sign in"
               disabled={!isValid}
-              onPress={() => {
-                // TODO: wire auth
-                console.log("Sign in");
+              onPress={async () => {
+                setError(null);
+                const ok = await signInWithAdmin(email, password);
+                if (!ok) {
+                  setError("Invalid credentials. Use admin / admin.");
+                  return;
+                }
+                router.replace("/(tabs)");
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
@@ -103,6 +118,8 @@ export default function LoginScreen() {
             >
               <Text style={styles.primaryButtonText}>Sign in</Text>
             </Pressable>
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
@@ -187,6 +204,13 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "700",
+  },
+  errorText: {
+    marginTop: 6,
+    color: "#D93025",
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
   },
   dividerRow: {
     flexDirection: "row",

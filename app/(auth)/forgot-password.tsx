@@ -1,7 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 const COLORS = {
   bg: "#FFFFFF",
@@ -10,9 +14,10 @@ const COLORS = {
 };
 
 export default function ForgotPasswordScreen() {
+  const insets = useSafeAreaInsets();
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Go back"
