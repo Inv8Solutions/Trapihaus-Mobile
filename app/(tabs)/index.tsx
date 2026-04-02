@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+    ActivityIndicator,
     FlatList,
     Pressable,
     StyleSheet,
@@ -16,74 +17,116 @@ import {
 
 import { CategoryPills } from "@/components/home/category-pills";
 import { ListingCard, type Listing } from "@/components/home/listing-card";
+import { fetchListingsCollection } from "@/constants/firebase";
 import { router } from "expo-router";
+
+type DashboardListing = Listing & {
+  category?: "Hotels" | "Apartments" | "Transients";
+};
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [category, setCategory] = useState<
     "Hotels" | "Apartments" | "Transients"
   >("Hotels");
+  const [listings, setListings] = useState<DashboardListing[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saved, setSaved] = useState<Record<string, boolean>>({});
 
-  const data: Listing[] = useMemo(
-    () => [
-      {
-        id: "1",
-        title: "Lokan Heights Residences",
-        subtitle: "Near Camp John Hay",
-        price: "₱6,300",
-        period: "month",
-        verified: true,
-        image: require("@/assets/images/react-logo.png"),
-      },
-      {
-        id: "2",
-        title: "Lokan Heights Residences",
-        subtitle: "Near Camp John Hay",
-        price: "₱6,300",
-        period: "month",
-        verified: true,
-        image: require("@/assets/images/react-logo.png"),
-      },
-      {
-        id: "3",
-        title: "Lokan Heights Residences",
-        subtitle: "Near Camp John Hay",
-        price: "₱6,300",
-        period: "month",
-        verified: true,
-        image: require("@/assets/images/react-logo.png"),
-      },
-      {
-        id: "4",
-        title: "Lokan Heights Residences",
-        subtitle: "Near Camp John Hay",
-        price: "₱6,300",
-        period: "month",
-        verified: true,
-        image: require("@/assets/images/react-logo.png"),
-      },
-      {
-        id: "5",
-        title: "Lokan Heights Residences",
-        subtitle: "Near Camp John Hay",
-        price: "₱6,300",
-        period: "month",
-        verified: true,
-        image: require("@/assets/images/react-logo.png"),
-      },
-      {
-        id: "6",
-        title: "Lokan Heights Residences",
-        subtitle: "Near Camp John Hay",
-        price: "₱6,300",
-        period: "month",
-        verified: true,
-        image: require("@/assets/images/react-logo.png"),
-      },
-    ],
-    [],
-  );
+  useEffect(() => {
+    let isMounted = true;
+
+    (async () => {
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+
+        const rows = await fetchListingsCollection();
+        const normalized = rows.map((row: any) => {
+          const imageUrl =
+            row.coverPhoto ??
+            (Array.isArray(row.photos) ? row.photos[0] : undefined) ??
+            row.imageUrl ??
+            row.image ??
+            row.thumbnailUrl ??
+            (Array.isArray(row.images) ? row.images[0] : undefined);
+
+          const rawPrice = row.rate;
+          let price = "N/A";
+          if (typeof rawPrice === "number") {
+            price = `PHP ${rawPrice.toLocaleString()}`;
+          } else if (typeof rawPrice === "string" && rawPrice.trim().length) {
+            const parsed = Number(rawPrice);
+            price = Number.isNaN(parsed)
+              ? rawPrice
+              : `PHP ${parsed.toLocaleString()}`;
+          }
+
+          const barangay =
+            typeof row.barangay === "string" ? row.barangay.trim() : "";
+          const city = typeof row.city === "string" ? row.city.trim() : "";
+          const location = [barangay, city].filter(Boolean).join(", ");
+
+          const rawCategory =
+            typeof row.propertyType === "string"
+              ? row.propertyType.toLowerCase()
+              : "";
+          let normalizedCategory: DashboardListing["category"];
+          if (rawCategory === "hotel" || rawCategory === "hotels") {
+            normalizedCategory = "Hotels";
+          } else if (
+            rawCategory === "apartment" ||
+            rawCategory === "apartments"
+          ) {
+            normalizedCategory = "Apartments";
+          } else if (
+            rawCategory === "transient" ||
+            rawCategory === "transients"
+          ) {
+            normalizedCategory = "Transients";
+          }
+
+          const item: DashboardListing = {
+            id: String(row.id),
+            title: row.propertyName ?? "Untitled listing",
+            subtitle: location || "Location unavailable",
+            price,
+            period:
+              (typeof row.ratePeriod === "string"
+                ? row.ratePeriod.replace(/^per\s+/i, "")
+                : row.ratePeriod) ?? "night",
+            verified: String(row.status ?? "").toLowerCase() === "approved",
+            category: normalizedCategory,
+            image: imageUrl
+              ? { uri: String(imageUrl) }
+              : require("@/assets/images/react-logo.png"),
+          };
+
+          return item;
+        });
+
+        if (!isMounted) return;
+        setListings(normalized);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error("Failed to fetch listings", error);
+        setLoadError("Could not load listings right now.");
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const data = useMemo(() => {
+    return listings.filter(
+      (item) => !item.category || item.category === category,
+    );
+  }, [category, listings]);
 
   const renderItem = ({ item }: ListRenderItemInfo<Listing>) => (
     <View style={styles.columnItem}>
@@ -199,8 +242,23 @@ export default function HomeScreen() {
             />
 
             <View style={styles.countRow}>
-              <Text style={styles.countText}>24 accommodations found</Text>
+              <Text style={styles.countText}>
+                {data.length} accommodations found
+              </Text>
             </View>
+
+            {isLoading ? (
+              <View style={styles.statusRow}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.statusText}>Loading listings...</Text>
+              </View>
+            ) : null}
+
+            {loadError ? (
+              <View style={styles.statusRow}>
+                <Text style={styles.errorText}>{loadError}</Text>
+              </View>
+            ) : null}
           </View>
         }
       />
@@ -342,6 +400,24 @@ const styles = StyleSheet.create({
   columnWrapper: {
     paddingHorizontal: 16,
     gap: 14,
+  },
+  statusRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    flexDirection: "row",
+  },
+  statusText: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  errorText: {
+    color: "#D93025",
+    fontSize: 12,
+    fontWeight: "700",
   },
   columnItem: {
     flex: 1,

@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
     createContext,
     useContext,
@@ -7,7 +6,7 @@ import React, {
     useState,
 } from "react";
 
-const STORAGE_KEY = "@trapihaus/isSignedIn";
+import { signOutCurrentUser, subscribeToAuthState } from "@/constants/firebase";
 
 type AuthContextValue = {
   isReady: boolean;
@@ -23,20 +22,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isSignedIn, setIsSignedIn] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (cancelled) return;
-        setIsSignedIn(stored === "1");
-      } finally {
-        if (!cancelled) setIsReady(true);
+    let isFirstAuthEvent = true;
+    const unsubscribe = subscribeToAuthState((signedIn) => {
+      setIsSignedIn(signedIn);
+      if (isFirstAuthEvent) {
+        setIsReady(true);
+        isFirstAuthEvent = false;
       }
-    })();
+    });
 
     return () => {
-      cancelled = true;
+      unsubscribe();
     };
   }, []);
 
@@ -48,12 +44,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const ok = username.trim() === "admin" && password === "admin";
         if (!ok) return false;
         setIsSignedIn(true);
-        await AsyncStorage.setItem(STORAGE_KEY, "1");
         return true;
       },
       async signOut() {
+        await signOutCurrentUser();
         setIsSignedIn(false);
-        await AsyncStorage.removeItem(STORAGE_KEY);
       },
     }),
     [isReady, isSignedIn],

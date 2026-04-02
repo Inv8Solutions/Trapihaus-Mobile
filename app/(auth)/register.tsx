@@ -125,7 +125,7 @@ export default function RegisterScreen() {
                   setError("Invalid credentials. Use admin / admin.");
                   return;
                 }
-                router.replace("/(tabs)");
+                router.replace("/(tabs)/index");
               }}
               style={({ pressed }) => [
                 styles.primaryButton,

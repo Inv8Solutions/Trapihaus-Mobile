@@ -17,7 +17,7 @@ import {
 
 import { AuthTextInput } from "@/components/auth/auth-text-input";
 import { SocialAuthRow } from "@/components/auth/social-auth-row";
-import { useAuth } from "@/context/auth-context";
+import { auth, signInWithEmail } from "@/constants/firebase";
 
 const COLORS = {
   bg: "#FFFFFF",
@@ -30,10 +30,10 @@ const COLORS = {
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { signInWithAdmin } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const isValid = useMemo(
     () => email.trim().length > 0 && password.length > 0,
@@ -100,23 +100,36 @@ export default function LoginScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Sign in"
-              disabled={!isValid}
+              disabled={!isValid || isSigningIn}
               onPress={async () => {
                 setError(null);
-                const ok = await signInWithAdmin(email, password);
-                if (!ok) {
-                  setError("Invalid credentials. Use admin / admin.");
-                  return;
+                setIsSigningIn(true);
+                try {
+                  await signInWithEmail(email.trim(), password);
+                  router.replace("/(tabs)");
+                } catch (err: any) {
+                  console.error("signInWithEmailAndPassword error", err);
+                  const code = err?.code ?? "";
+                  if (code === "auth/invalid-email")
+                    setError("Please enter a valid email address.");
+                  else if (code === "auth/wrong-password")
+                    setError("Incorrect password.");
+                  else if (code === "auth/user-not-found")
+                    setError("No account found for that email.");
+                  else setError("Failed to sign in. Please try again.");
+                } finally {
+                  setIsSigningIn(false);
                 }
-                router.replace("/(tabs)");
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
-                !isValid && styles.primaryButtonDisabled,
+                (!isValid || isSigningIn) && styles.primaryButtonDisabled,
                 pressed && isValid && styles.primaryButtonPressed,
               ]}
             >
-              <Text style={styles.primaryButtonText}>Sign in</Text>
+              <Text style={styles.primaryButtonText}>
+                {isSigningIn ? "Signing in…" : "Sign in"}
+              </Text>
             </Pressable>
 
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -128,9 +141,64 @@ export default function LoginScreen() {
             </View>
 
             <SocialAuthRow
-              onFacebook={() => console.log("Facebook")}
-              onGoogle={() => console.log("Google")}
-              onApple={() => console.log("Apple")}
+              onFacebook={async () => {
+                setError(null);
+                try {
+                  if (Platform.OS === "web") {
+                    const { FacebookAuthProvider, signInWithPopup } =
+                      await import("firebase/auth");
+                    const provider = new FacebookAuthProvider();
+                    await signInWithPopup(auth, provider);
+                    router.replace("/(tabs)");
+                  } else {
+                    // Native social auth requires native OAuth flow (expo-auth-session / native SDKs)
+                    setError(
+                      "Facebook sign-in is not implemented for native yet.",
+                    );
+                  }
+                } catch (err: any) {
+                  console.error("Facebook sign-in error", err);
+                  setError("Facebook sign-in failed.");
+                }
+              }}
+              onGoogle={async () => {
+                setError(null);
+                try {
+                  if (Platform.OS === "web") {
+                    const { GoogleAuthProvider, signInWithPopup } =
+                      await import("firebase/auth");
+                    const provider = new GoogleAuthProvider();
+                    await signInWithPopup(auth, provider);
+                    router.replace("/(tabs)");
+                  } else {
+                    setError(
+                      "Google sign-in is not implemented for native yet.",
+                    );
+                  }
+                } catch (err: any) {
+                  console.error("Google sign-in error", err);
+                  setError("Google sign-in failed.");
+                }
+              }}
+              onApple={async () => {
+                setError(null);
+                try {
+                  if (Platform.OS === "web") {
+                    const { OAuthProvider, signInWithPopup } =
+                      await import("firebase/auth");
+                    const provider = new OAuthProvider("apple.com");
+                    await signInWithPopup(auth, provider);
+                    router.replace("/(tabs)");
+                  } else {
+                    setError(
+                      "Apple sign-in is not implemented for native yet.",
+                    );
+                  }
+                } catch (err: any) {
+                  console.error("Apple sign-in error", err);
+                  setError("Apple sign-in failed.");
+                }
+              }}
             />
 
             <View style={styles.bottomRow}>

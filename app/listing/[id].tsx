@@ -2,21 +2,26 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-    Pressable,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    View,
-    type GestureResponderEvent,
+  ActivityIndicator,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type GestureResponderEvent,
 } from "react-native";
 import {
-    SafeAreaView,
-    useSafeAreaInsets,
+  SafeAreaView,
+  useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { fetchListingById } from "@/constants/firebase";
 import { useAuth } from "@/context/auth-context";
 
 const COLORS = {
@@ -36,6 +41,39 @@ type Amenity = {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
 };
+
+type HeroImageSource = { uri: string } | number;
+
+function getAmenityIcon(label: string): keyof typeof Ionicons.glyphMap {
+  const value = label.toLowerCase();
+  if (value.includes("wifi")) return "wifi";
+  if (value.includes("pet")) return "paw-outline";
+  if (value.includes("room service")) return "restaurant-outline";
+  if (value.includes("parking")) return "car-outline";
+  if (value.includes("ac") || value.includes("air")) return "snow-outline";
+  if (value.includes("kitchen")) return "restaurant-outline";
+  if (value.includes("tv")) return "tv-outline";
+  if (value.includes("pool") || value.includes("tub")) return "water-outline";
+  return "checkmark-circle-outline";
+}
+
+function toImageUrl(value: unknown): string | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "url" in value &&
+    typeof (value as { url?: unknown }).url === "string"
+  ) {
+    const maybeUrl = (value as { url: string }).url.trim();
+    return maybeUrl.length > 0 ? maybeUrl : null;
+  }
+
+  return null;
+}
 
 type ListingDetails = {
   id: string;
@@ -76,32 +114,168 @@ function CircleIconButton({
 export default function ListingDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
+  const { width: viewportWidth } = useWindowDimensions();
   const { isReady, isSignedIn } = useAuth();
   const [isSaved, setIsSaved] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [listingDoc, setListingDoc] = useState<any | null>(null);
 
-  const details = useMemo<ListingDetails>(() => {
-    return {
-      id: String(id ?? "1"),
-      title: "Loakan Heights\nResidences",
-      location: "Near Camp John Hay",
-      rating: "4.6",
-      price: "₱6,300",
-      period: "month",
-      verified: true,
-      hostName: "Hosted by Maria Santos",
-      hostMeta: "Host • Since October 2025",
-      about:
-        "Experience the charm of Baguio City in this beautifully appointed accommodation. Perfect for families or groups looking for a comfortable and memorable stay. Located in a prime area with easy access to major attractions and local amenities.",
-      amenities: [
-        { key: "wifi", label: "Wi‑Fi", icon: "wifi" },
-        { key: "parking", label: "Parking", icon: "car-outline" },
-        { key: "ac", label: "AC", icon: "snow-outline" },
-        { key: "tv", label: "TV", icon: "tv-outline" },
-        { key: "kitchen", label: "Kitchen", icon: "restaurant-outline" },
-        { key: "hottub", label: "Hot Tub", icon: "water-outline" },
-      ],
+  useEffect(() => {
+    const listingId = String(id ?? "").trim();
+    if (!listingId) {
+      setLoadError("Listing not found.");
+      setIsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    (async () => {
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+
+        const row = await fetchListingById(listingId);
+        if (!isMounted) return;
+
+        if (!row) {
+          setLoadError("Listing not found.");
+          setListingDoc(null);
+          return;
+        }
+
+        setListingDoc(row);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error("Failed to fetch listing", error);
+        setLoadError("Could not load listing details.");
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
     };
   }, [id]);
+
+  const details = useMemo<ListingDetails>(() => {
+    const row = listingDoc ?? {};
+    const barangay =
+      typeof row.barangay === "string" ? row.barangay.trim() : "";
+    const city = typeof row.city === "string" ? row.city.trim() : "";
+    const location = [barangay, city].filter(Boolean).join(", ");
+
+    const rawRate = row.rate;
+    let price = "N/A";
+    if (typeof rawRate === "number") {
+      price = `PHP ${rawRate.toLocaleString()}`;
+    } else if (typeof rawRate === "string" && rawRate.trim().length > 0) {
+      const parsed = Number(rawRate);
+      price = Number.isNaN(parsed) ? rawRate : `PHP ${parsed.toLocaleString()}`;
+    }
+
+    const hostFirst =
+      typeof row.hostFirstName === "string" ? row.hostFirstName.trim() : "";
+    const hostLast =
+      typeof row.hostLastName === "string" ? row.hostLastName.trim() : "";
+    const hostFullName = [hostFirst, hostLast].filter(Boolean).join(" ");
+
+    const stayParts = [row.minStay, row.maxStay]
+      .filter((value: unknown) => typeof value === "string" && value.trim())
+      .map((value: string) => value.trim());
+    const stayRange =
+      stayParts.length === 2
+        ? `${stayParts[0]} - ${stayParts[1]}`
+        : (stayParts[0] ?? "");
+
+    const dynamicAmenities: Amenity[] = Array.isArray(row.amenities)
+      ? row.amenities
+          .filter((value: unknown) => typeof value === "string" && value.trim())
+          .map((label: string, index: number) => ({
+            key: `${label}-${index}`,
+            label: label.trim(),
+            icon: getAmenityIcon(label),
+          }))
+      : [];
+
+    return {
+      id: String(id ?? "1"),
+      title: row.propertyName ?? "Untitled listing",
+      location: location || "Location unavailable",
+      rating:
+        typeof row.averageRating === "number"
+          ? row.averageRating.toFixed(1)
+          : "N/A",
+      price,
+      period:
+        (typeof row.ratePeriod === "string"
+          ? row.ratePeriod.replace(/^per\s+/i, "")
+          : row.ratePeriod) ?? "night",
+      verified: String(row.status ?? "").toLowerCase() === "approved",
+      hostName:
+        hostFullName.length > 0
+          ? `Hosted by ${hostFullName}`
+          : "Hosted by Trapihaus",
+      hostMeta:
+        [row.availability, stayRange].filter(Boolean).join(" • ") || "Host",
+      about:
+        row.description ??
+        "No additional description provided for this listing yet.",
+      amenities:
+        dynamicAmenities.length > 0
+          ? dynamicAmenities
+          : [
+              { key: "wifi", label: "Wi‑Fi", icon: "wifi" },
+              { key: "parking", label: "Parking", icon: "car-outline" },
+            ],
+    };
+  }, [id, listingDoc]);
+
+  const heroImageSources = useMemo<HeroImageSource[]>(() => {
+    const row = listingDoc ?? {};
+    const candidates: unknown[] = [
+      row.coverPhoto,
+      ...(Array.isArray(row.photos) ? row.photos : []),
+      row.imageUrl,
+      row.image,
+      row.thumbnailUrl,
+      ...(Array.isArray(row.images) ? row.images : []),
+    ];
+
+    const dedupedUrls = Array.from(
+      new Set(
+        candidates
+          .map((value) => toImageUrl(value))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    if (dedupedUrls.length > 0) {
+      return dedupedUrls.map((uri) => ({ uri }));
+    }
+
+    return [require("@/assets/images/react-logo.png")];
+  }, [listingDoc]);
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+  }, [heroImageSources.length, details.id]);
+
+  const onHeroMomentumEnd = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) => {
+    if (viewportWidth <= 0) return;
+
+    const nextIndex = Math.round(
+      event.nativeEvent.contentOffset.x / viewportWidth,
+    );
+    const maxIndex = Math.max(heroImageSources.length - 1, 0);
+    const clampedIndex = Math.max(0, Math.min(nextIndex, maxIndex));
+    setActiveImageIndex(clampedIndex);
+  };
 
   if (!isReady) return null;
   if (!isSignedIn) return <Redirect href="/login" />;
@@ -120,11 +294,24 @@ export default function ListingDetailsScreen() {
         ]}
       >
         <View style={styles.hero}>
-          <Image
-            source={require("@/assets/images/react-logo.png")}
-            style={styles.heroImage}
-            contentFit="cover"
-          />
+          <ScrollView
+            horizontal
+            pagingEnabled
+            bounces={false}
+            scrollEventThrottle={16}
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={heroImageSources.length > 1}
+            onMomentumScrollEnd={onHeroMomentumEnd}
+          >
+            {heroImageSources.map((source, index) => (
+              <Image
+                key={`hero-image-${index}`}
+                source={source}
+                style={[styles.heroImage, { width: viewportWidth }]}
+                contentFit="cover"
+              />
+            ))}
+          </ScrollView>
 
           <View style={[styles.heroTopRow, { paddingTop: insets.top + 10 }]}>
             <CircleIconButton
@@ -166,14 +353,35 @@ export default function ListingDetailsScreen() {
             </View>
           ) : null}
 
-          <View style={styles.dotsRow}>
-            <View style={[styles.dot, styles.dotActive]} />
-            <View style={styles.dot} />
-            <View style={styles.dot} />
-          </View>
+          {heroImageSources.length > 1 ? (
+            <View style={styles.dotsRow}>
+              {heroImageSources.map((_, index) => (
+                <View
+                  key={`dot-${index}`}
+                  style={[
+                    styles.dot,
+                    index === activeImageIndex && styles.dotActive,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.sheet}>
+          {isLoading ? (
+            <View style={styles.fetchStateRow}>
+              <ActivityIndicator color={COLORS.primary} />
+              <Text style={styles.fetchStateText}>Loading details...</Text>
+            </View>
+          ) : null}
+
+          {loadError ? (
+            <View style={styles.fetchStateRow}>
+              <Text style={styles.fetchStateError}>{loadError}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.titleRow}>
             <Text style={styles.title}>{details.title}</Text>
             <View style={styles.ratingPill}>
@@ -273,7 +481,7 @@ export default function ListingDetailsScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Book now"
-          onPress={() => console.log("Book Now")}
+          onPress={() => router.push("/booking/step-1" as never)}
           style={({ pressed }) => [
             styles.bookButton,
             pressed && styles.pressed,
@@ -299,7 +507,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#D7DCE2",
   },
   heroImage: {
-    width: "100%",
     height: "100%",
   },
   heroTopRow: {
@@ -463,6 +670,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "900",
     color: COLORS.text,
+  },
+  fetchStateRow: {
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  fetchStateText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.muted,
+  },
+  fetchStateError: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#D93025",
   },
   amenitiesGrid: {
     marginTop: 10,
