@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { Redirect, router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -21,7 +21,10 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
-import { fetchListingById } from "@/constants/firebase";
+import {
+  fetchListingById,
+  fetchReviewsByListingId,
+} from "@/constants/firebase";
 import { useAuth } from "@/context/auth-context";
 
 const COLORS = {
@@ -121,6 +124,9 @@ export default function ListingDetailsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [listingDoc, setListingDoc] = useState<any | null>(null);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
 
   useEffect(() => {
     const listingId = String(id ?? "").trim();
@@ -264,6 +270,61 @@ export default function ListingDetailsScreen() {
     setActiveImageIndex(0);
   }, [heroImageSources.length, details.id]);
 
+  useEffect(() => {
+    let mounted = true;
+    async function load() {
+      if (!details.id) return;
+      setReviewsLoading(true);
+      setReviewsError(null);
+      try {
+        const docs = await fetchReviewsByListingId(details.id);
+        if (!mounted) return;
+        const mapped: {
+          id: string;
+          authorName: string;
+          createdAt: Date;
+          rating: number;
+          body: string;
+        }[] = (docs || []).map((d: any) => {
+          const created = d.createdAt ?? d.created_at ?? d.timestamp ?? null;
+          let date = new Date();
+          if (created && typeof created.toDate === "function") {
+            date = created.toDate();
+          } else if (created && typeof created.seconds === "number") {
+            date = new Date(created.seconds * 1000);
+          } else if (typeof created === "number") {
+            date = new Date(created);
+          } else if (typeof created === "string") {
+            const parsed = Date.parse(created);
+            if (!Number.isNaN(parsed)) date = new Date(parsed);
+          }
+
+          return {
+            id: d.id,
+            authorName: d.authorName ?? d.name ?? "Guest",
+            createdAt: date,
+            rating: Number(d.rating) || 0,
+            body: d.body ?? d.text ?? "",
+          };
+        });
+        // sort newest first by createdAt
+        mapped.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        setReviews(mapped);
+      } catch (err) {
+        console.error("Failed to load listing reviews", err);
+        if (!mounted) return;
+        setReviewsError("Could not load reviews.");
+      } finally {
+        if (mounted) setReviewsLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, [details.id]);
+
   const onHeroMomentumEnd = (
     event: NativeSyntheticEvent<NativeScrollEvent>,
   ) => {
@@ -283,214 +344,246 @@ export default function ListingDetailsScreen() {
   const bottomBarHeight = 86 + insets.bottom;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
-      <StatusBar style="light" />
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
+        <StatusBar style="light" />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: bottomBarHeight },
-        ]}
-      >
-        <View style={styles.hero}>
-          <ScrollView
-            horizontal
-            pagingEnabled
-            bounces={false}
-            scrollEventThrottle={16}
-            showsHorizontalScrollIndicator={false}
-            scrollEnabled={heroImageSources.length > 1}
-            onMomentumScrollEnd={onHeroMomentumEnd}
-          >
-            {heroImageSources.map((source, index) => (
-              <Image
-                key={`hero-image-${index}`}
-                source={source}
-                style={[styles.heroImage, { width: viewportWidth }]}
-                contentFit="cover"
-              />
-            ))}
-          </ScrollView>
-
-          <View style={[styles.heroTopRow, { paddingTop: insets.top + 10 }]}>
-            <CircleIconButton
-              icon="chevron-back"
-              accessibilityLabel="Go back"
-              onPress={() => router.back()}
-            />
-
-            <View style={styles.heroTopRight}>
-              <CircleIconButton
-                icon="share-social-outline"
-                accessibilityLabel="Share"
-                onPress={async () => {
-                  try {
-                    await Share.share({
-                      message: `${details.title} - ${details.location}`,
-                    });
-                  } catch {
-                    // ignore
-                  }
-                }}
-              />
-              <CircleIconButton
-                icon={isSaved ? "heart" : "heart-outline"}
-                accessibilityLabel={isSaved ? "Unsave listing" : "Save listing"}
-                onPress={() => setIsSaved((v) => !v)}
-              />
-            </View>
-          </View>
-
-          {details.verified ? (
-            <View style={styles.verifiedPill}>
-              <Ionicons
-                name="checkmark-circle"
-                size={14}
-                color={COLORS.greenText}
-              />
-              <Text style={styles.verifiedText}>Verified</Text>
-            </View>
-          ) : null}
-
-          {heroImageSources.length > 1 ? (
-            <View style={styles.dotsRow}>
-              {heroImageSources.map((_, index) => (
-                <View
-                  key={`dot-${index}`}
-                  style={[
-                    styles.dot,
-                    index === activeImageIndex && styles.dotActive,
-                  ]}
-                />
-              ))}
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.sheet}>
-          {isLoading ? (
-            <View style={styles.fetchStateRow}>
-              <ActivityIndicator color={COLORS.primary} />
-              <Text style={styles.fetchStateText}>Loading details...</Text>
-            </View>
-          ) : null}
-
-          {loadError ? (
-            <View style={styles.fetchStateRow}>
-              <Text style={styles.fetchStateError}>{loadError}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>{details.title}</Text>
-            <View style={styles.ratingPill}>
-              <Ionicons name="star" size={14} color="#C29A00" />
-              <Text style={styles.ratingText}>{details.rating}</Text>
-            </View>
-          </View>
-
-          <View style={styles.locationRow}>
-            <Ionicons
-              name="location-outline"
-              size={16}
-              color={COLORS.primary}
-            />
-            <Text style={styles.locationText}>{details.location}</Text>
-          </View>
-
-          <View style={styles.hostCard}>
-            <View style={styles.hostLeft}>
-              <View style={styles.hostAvatar} />
-              <View style={styles.hostTextWrap}>
-                <Text style={styles.hostTitle}>{details.hostName}</Text>
-                <Text style={styles.hostMeta}>{details.hostMeta}</Text>
-              </View>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Contact host"
-              onPress={() => console.log("Contact")}
-              style={({ pressed }) => [
-                styles.contactButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.contactText}>Contact</Text>
-            </Pressable>
-          </View>
-
-          <Text style={styles.sectionTitle}>Amenities</Text>
-          <View style={styles.amenitiesGrid}>
-            {details.amenities.map((a) => (
-              <View key={a.key} style={styles.amenityItem}>
-                <View style={styles.amenityIconWrap}>
-                  <Ionicons name={a.icon} size={16} color={COLORS.primary} />
-                </View>
-                <Text style={styles.amenityLabel}>{a.label}</Text>
-              </View>
-            ))}
-          </View>
-
-          <Text style={styles.sectionTitle}>About this place</Text>
-          <Text style={styles.aboutText}>{details.about}</Text>
-
-          <View style={styles.sectionRow}>
-            <Text style={styles.sectionTitle}>Reviews</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="See all reviews"
-              onPress={() =>
-                router.push({
-                  pathname: "/listing/reviews",
-                  params: { id: details.id },
-                })
-              }
-              style={({ pressed }) => [pressed && styles.pressed]}
-            >
-              <Text style={styles.seeAll}>See all</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.reviewCard}>
-            <View style={styles.reviewTop}>
-              <View style={styles.reviewAvatar} />
-              <View style={styles.reviewMeta}>
-                <Text style={styles.reviewName}>John Dela Cruz</Text>
-                <Text style={styles.reviewTime}>2 weeks ago</Text>
-              </View>
-              <View style={styles.reviewRating}>
-                <Ionicons name="star" size={14} color="#C29A00" />
-                <Text style={styles.reviewRatingText}>5.0</Text>
-              </View>
-            </View>
-            <Text style={styles.reviewBody}>
-              Amazing place! Very clean and comfortable. The host was very
-              accommodating. Would definitely stay here again!
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
-        <View>
-          <Text style={styles.bottomPrice}>{details.price}</Text>
-          <Text style={styles.bottomPeriod}>per {details.period}</Text>
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Book now"
-          onPress={() => router.push("/booking/step-1" as never)}
-          style={({ pressed }) => [
-            styles.bookButton,
-            pressed && styles.pressed,
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: bottomBarHeight },
           ]}
         >
-          <Text style={styles.bookText}>Book Now</Text>
-        </Pressable>
-      </View>
-    </SafeAreaView>
+          <View style={styles.hero}>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              bounces={false}
+              scrollEventThrottle={16}
+              showsHorizontalScrollIndicator={false}
+              scrollEnabled={heroImageSources.length > 1}
+              onMomentumScrollEnd={onHeroMomentumEnd}
+            >
+              {heroImageSources.map((source, index) => (
+                <Image
+                  key={`hero-image-${index}`}
+                  source={source}
+                  style={[styles.heroImage, { width: viewportWidth }]}
+                  contentFit="cover"
+                />
+              ))}
+            </ScrollView>
+
+            <View style={[styles.heroTopRow, { paddingTop: insets.top + 10 }]}>
+              <CircleIconButton
+                icon="chevron-back"
+                accessibilityLabel="Go back"
+                onPress={() => router.back()}
+              />
+
+              <View style={styles.heroTopRight}>
+                <CircleIconButton
+                  icon="share-social-outline"
+                  accessibilityLabel="Share"
+                  onPress={async () => {
+                    try {
+                      await Share.share({
+                        message: `${details.title} - ${details.location}`,
+                      });
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                />
+                <CircleIconButton
+                  icon={isSaved ? "heart" : "heart-outline"}
+                  accessibilityLabel={
+                    isSaved ? "Unsave listing" : "Save listing"
+                  }
+                  onPress={() => setIsSaved((v) => !v)}
+                />
+              </View>
+            </View>
+
+            {details.verified ? (
+              <View style={styles.verifiedPill}>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={14}
+                  color={COLORS.greenText}
+                />
+                <Text style={styles.verifiedText}>Verified</Text>
+              </View>
+            ) : (
+              <View style={styles.emptyCardSmall}>
+                <Text style={styles.emptyTitleSmall}>No reviews yet</Text>
+                <Text style={styles.emptyBodySmall}>
+                  Be the first to leave a review for this listing.
+                </Text>
+              </View>
+            )}
+
+            {heroImageSources.length > 1 ? (
+              <View style={styles.dotsRow}>
+                {heroImageSources.map((_, index) => (
+                  <View
+                    key={`dot-${index}`}
+                    style={[
+                      styles.dot,
+                      index === activeImageIndex && styles.dotActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.sheet}>
+            {isLoading ? (
+              <View style={styles.fetchStateRow}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.fetchStateText}>Loading details...</Text>
+              </View>
+            ) : null}
+
+            {loadError ? (
+              <View style={styles.fetchStateRow}>
+                <Text style={styles.fetchStateError}>{loadError}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>{details.title}</Text>
+              <View style={styles.ratingPill}>
+                <Ionicons name="star" size={14} color="#C29A00" />
+                <Text style={styles.ratingText}>{details.rating}</Text>
+              </View>
+            </View>
+
+            <View style={styles.locationRow}>
+              <Ionicons
+                name="location-outline"
+                size={16}
+                color={COLORS.primary}
+              />
+              <Text style={styles.locationText}>{details.location}</Text>
+            </View>
+
+            <View style={styles.hostCard}>
+              <View style={styles.hostLeft}>
+                <View style={styles.hostAvatar} />
+                <View style={styles.hostTextWrap}>
+                  <Text style={styles.hostTitle}>{details.hostName}</Text>
+                  <Text style={styles.hostMeta}>{details.hostMeta}</Text>
+                </View>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Contact host"
+                onPress={() => console.log("Contact")}
+                style={({ pressed }) => [
+                  styles.contactButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.contactText}>Contact</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.sectionTitle}>Amenities</Text>
+            <View style={styles.amenitiesGrid}>
+              {details.amenities.map((a) => (
+                <View key={a.key} style={styles.amenityItem}>
+                  <View style={styles.amenityIconWrap}>
+                    <Ionicons name={a.icon} size={16} color={COLORS.primary} />
+                  </View>
+                  <Text style={styles.amenityLabel}>{a.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={styles.sectionTitle}>About this place</Text>
+            <Text style={styles.aboutText}>{details.about}</Text>
+
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Reviews</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="See all reviews"
+                onPress={() =>
+                  router.push({
+                    pathname: "/listing/reviews",
+                    params: { id: details.id },
+                  })
+                }
+                style={({ pressed }) => [pressed && styles.pressed]}
+              >
+                <Text style={styles.seeAll}>See all</Text>
+              </Pressable>
+            </View>
+
+            {reviewsLoading ? (
+              <View style={styles.fetchStateRow}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.fetchStateText}>Loading reviews...</Text>
+              </View>
+            ) : reviews.length > 0 ? (
+              <View style={styles.reviewCard}>
+                <View style={styles.reviewTop}>
+                  <View style={styles.reviewAvatar} />
+                  <View style={styles.reviewMeta}>
+                    <Text style={styles.reviewName}>
+                      {reviews[0].authorName}
+                    </Text>
+                    <Text style={styles.reviewTime}>
+                      {
+                        // pretty simple relative time
+                        (() => {
+                          const diff =
+                            Date.now() - reviews[0].createdAt.getTime();
+                          const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                          if (days <= 0) return "Today";
+                          if (days === 1) return "1 day ago";
+                          return `${days} days ago`;
+                        })()
+                      }
+                    </Text>
+                  </View>
+                  <View style={styles.reviewRating}>
+                    <Ionicons name="star" size={14} color="#C29A00" />
+                    <Text style={styles.reviewRatingText}>
+                      {reviews[0].rating.toFixed(1)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.reviewBody}>{reviews[0].body}</Text>
+              </View>
+            ) : null}
+          </View>
+        </ScrollView>
+
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
+          <View>
+            <Text style={styles.bottomPrice}>{details.price}</Text>
+            <Text style={styles.bottomPeriod}>per {details.period}</Text>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Book now"
+            onPress={() => router.push("/booking/step-1" as never)}
+            style={({ pressed }) => [
+              styles.bookButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.bookText}>Book Now</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </>
   );
 }
 
@@ -787,6 +880,27 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "700",
     color: "#6F7B88",
+  },
+  emptyCardSmall: {
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 12,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+  },
+  emptyTitleSmall: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: COLORS.text,
+  },
+  emptyBodySmall: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.muted,
+    textAlign: "center",
   },
   bottomBar: {
     position: "absolute",

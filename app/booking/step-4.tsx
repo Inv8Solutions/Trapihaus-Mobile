@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React from "react";
 import {
@@ -49,7 +50,7 @@ export default function BookingStep4Screen() {
           onPress={() => router.back()}
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
         >
-          <Text style={styles.backIcon}>←</Text>
+          <Ionicons name="arrow-back" size={20} color="#11181C" />
         </Pressable>
         <Text style={styles.headerTitle}>Booking Summary</Text>
       </View>
@@ -164,11 +165,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-  },
-  backIcon: {
-    fontSize: 20,
-    color: "#11181C",
-    lineHeight: 20,
   },
   headerTitle: {
     marginLeft: 8,

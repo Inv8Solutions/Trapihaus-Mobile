@@ -4,9 +4,9 @@ import { Platform } from "react-native";
 // Web SDK (keeps web behavior working)
 import { getApp, getApps, initializeApp } from "firebase/app";
 import {
-  getAuth as getWebAuth,
-  onAuthStateChanged as onWebAuthStateChanged,
-  signOut as signOutWeb,
+    getAuth as getWebAuth,
+    onAuthStateChanged as onWebAuthStateChanged,
+    signOut as signOutWeb,
 } from "firebase/auth";
 import { getFirestore as getWebFirestore } from "firebase/firestore";
 import { getStorage as getWebStorage } from "firebase/storage";
@@ -124,6 +124,25 @@ export async function fetchListingById(id: string) {
   const snapshot = await getDoc(doc(firestore, "listings", id));
   if (!snapshot.exists()) return null;
   return { id: snapshot.id, ...snapshot.data() };
+}
+
+export async function fetchReviewsByListingId(listingId: string) {
+  if (isUsingNativeFirebase) {
+    const snapshot = await firestore
+      .collection("reviews")
+      .where("listingId", "==", listingId)
+      .get();
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+  }
+
+  const { collection, getDocs, query, where } =
+    await import("firebase/firestore");
+  const q = query(
+    collection(firestore, "reviews"),
+    where("listingId", "==", listingId),
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
 export { app, auth, firebaseConfig, firestore, isUsingNativeFirebase, storage };

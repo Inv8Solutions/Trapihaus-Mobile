@@ -1,7 +1,7 @@
 import {
-    DarkTheme,
-    DefaultTheme,
-    ThemeProvider,
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider,
 } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -44,17 +44,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="booking" options={{ headerShown: false }} />
-        <Stack.Screen name="listing/[id]" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="listing/reviews"
-          options={{
-            title: "Review",
-            headerTitleAlign: "center",
-            headerShadowVisible: false,
-            headerStyle: { backgroundColor: "#fff" },
-            headerTintColor: "#111",
-          }}
-        />
+        <Stack.Screen name="listing" options={{ headerShown: false }} />
         <Stack.Screen
           name="modal"
           options={{ presentation: "modal", title: "Modal" }}

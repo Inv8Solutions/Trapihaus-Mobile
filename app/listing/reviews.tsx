@@ -1,12 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useLocalSearchParams } from "expo-router";
-import React, { useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
 import {
-    SafeAreaView,
-    useSafeAreaInsets,
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { fetchReviewsByListingId } from "@/constants/firebase";
 import { useAuth } from "@/context/auth-context";
 
 const COLORS = {
@@ -63,31 +71,79 @@ export default function ReviewsScreen() {
   const { isReady, isSignedIn } = useAuth();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [filter, setFilter] = useState<Filter>("all");
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const allReviews = useMemo<Review[]>(
-    () => [
-      {
-        id: "r1",
-        name: "John Dela Cruz",
-        time: "1 month ago",
-        rating: 4.8,
-        body: "Comfortable stay and great location. The place was clean and the host was responsive.",
-      },
-      {
-        id: "r3",
-        name: "John Dela Cruz",
-        time: "2 weeks ago",
-        rating: 5.0,
-        body: "Amazing place! Very clean and comfortable. The host was very accommodating. Would definitely stay here again!",
-      },
-    ],
-    [],
-  );
+  // Helper to produce a human readable relative time (e.g., "2 weeks ago")
+  function timeAgo(date: Date) {
+    const secs = Math.round((Date.now() - date.getTime()) / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.round(days / 30);
+    if (months < 12) return `${months}mo ago`;
+    const years = Math.round(months / 12);
+    return `${years}y ago`;
+  }
 
-  const filtered = useMemo(() => {
-    if (filter === "all") return allReviews;
-    return allReviews.filter((r) => Math.floor(r.rating) === filter);
-  }, [allReviews, filter]);
+  React.useEffect(() => {
+    let mounted = true;
+    async function load() {
+      if (!id) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const docs = await fetchReviewsByListingId(String(id));
+        if (!mounted) return;
+        const mapped: Review[] = (docs || []).map((d: any) => {
+          const created = d.createdAt ?? d.created_at ?? d.timestamp ?? null;
+          let date = new Date();
+          if (created && typeof created.toDate === "function") {
+            date = created.toDate();
+          } else if (created && typeof created.seconds === "number") {
+            date = new Date(created.seconds * 1000);
+          } else if (typeof created === "number") {
+            date = new Date(created);
+          } else if (typeof created === "string") {
+            const parsed = Date.parse(created);
+            if (!Number.isNaN(parsed)) date = new Date(parsed);
+          }
+
+          return {
+            id: d.id,
+            name: d.authorName ?? d.name ?? "Guest",
+            time: timeAgo(date),
+            rating: Number(d.rating) || 0,
+            body: d.body ?? d.text ?? "",
+          };
+        });
+        // sort newest first
+        mapped.sort((a: Review, b: Review) => (a.time < b.time ? 1 : -1));
+        setReviews(mapped);
+      } catch (err) {
+        console.error("Failed to load reviews", err);
+        if (!mounted) return;
+        setError("Could not load reviews.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  const filtered = React.useMemo(() => {
+    if (filter === "all") return reviews;
+    return reviews.filter((r) => Math.floor(r.rating) === filter);
+  }, [reviews, filter]);
 
   if (!isReady) return null;
   if (!isSignedIn) return <Redirect href="/login" />;
@@ -119,10 +175,22 @@ export default function ReviewsScreen() {
         <Text style={styles.ratingLeft}>Rating</Text>
         <View style={styles.ratingRight}>
           <Ionicons name="star" size={14} color="#C29A00" />
-          <Text style={styles.ratingValue}>4.8</Text>
-          <Text style={styles.ratingMeta}>(40 Reviews)</Text>
+          <Text style={styles.ratingValue}>
+            {reviews.length > 0
+              ? (
+                  reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
+                ).toFixed(1)
+              : "0.0"}
+          </Text>
+          <Text style={styles.ratingMeta}>({reviews.length} Reviews)</Text>
         </View>
       </View>
+
+      {error ? (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+          <Text style={{ color: "#D93025", fontWeight: "800" }}>{error}</Text>
+        </View>
+      ) : null}
 
       <FlatList
         data={filtered}
@@ -153,6 +221,25 @@ export default function ReviewsScreen() {
         ListHeaderComponent={
           id ? <Text style={styles.hiddenId}>Listing: {id}</Text> : null
         }
+        ListEmptyComponent={() => {
+          if (loading) {
+            return (
+              <View style={styles.emptyWrap}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.emptyText}>Loading reviews…</Text>
+              </View>
+            );
+          }
+
+          return (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No reviews yet</Text>
+              <Text style={styles.emptyBody}>
+                Be the first to leave a review for this listing.
+              </Text>
+            </View>
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -195,6 +282,39 @@ const styles = StyleSheet.create({
   },
   chipTextSelected: {
     color: COLORS.chipSelectedText,
+  },
+  emptyWrap: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyText: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: "800",
+    color: COLORS.muted,
+  },
+  emptyCard: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: COLORS.text,
+  },
+  emptyBody: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: "#6F7B88",
+    textAlign: "center",
   },
   ratingRow: {
     paddingHorizontal: 16,
