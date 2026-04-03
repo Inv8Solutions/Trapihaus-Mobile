@@ -145,6 +145,25 @@ export async function fetchReviewsByListingId(listingId: string) {
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
+export async function fetchReservationsForUser(uid: string) {
+  if (isUsingNativeFirebase) {
+    const snapshot = await firestore
+      .collection("reservations")
+      .where("userId", "==", uid)
+      .get();
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+  }
+
+  const { collection, getDocs, query, where } =
+    await import("firebase/firestore");
+  const q = query(
+    collection(firestore, "reservations"),
+    where("userId", "==", uid),
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
 export { app, auth, firebaseConfig, firestore, isUsingNativeFirebase, storage };
 
 /*

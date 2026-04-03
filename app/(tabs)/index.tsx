@@ -2,22 +2,24 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-    type ListRenderItemInfo,
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type ListRenderItemInfo,
 } from "react-native";
 import {
-    SafeAreaView,
-    useSafeAreaInsets,
+  SafeAreaView,
+  useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
 import { CategoryPills } from "@/components/home/category-pills";
 import { ListingCard, type Listing } from "@/components/home/listing-card";
 import { fetchListingsCollection } from "@/constants/firebase";
+import { useSaved } from "@/context/saved-context";
+import { useTrip } from "@/context/trip-context";
 import { router } from "expo-router";
 
 type DashboardListing = Listing & {
@@ -32,7 +34,8 @@ export default function HomeScreen() {
   const [listings, setListings] = useState<DashboardListing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<Record<string, boolean>>({});
+  const { map: saved, toggle } = useSaved();
+  const { selection } = useTrip();
 
   useEffect(() => {
     let isMounted = true;
@@ -133,9 +136,7 @@ export default function HomeScreen() {
       <ListingCard
         item={item}
         isSaved={Boolean(saved[item.id])}
-        onToggleSaved={() =>
-          setSaved((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
-        }
+        onToggleSaved={() => void toggle(item)}
         onPress={() =>
           router.push({ pathname: "/listing/[id]", params: { id: item.id } })
         }
@@ -216,15 +217,36 @@ export default function HomeScreen() {
                 <View style={styles.searchTextWrap}>
                   <Text style={styles.searchTitle}>Where are you going?</Text>
                   <Text style={styles.searchSubtitle}>
-                    Add dates • Add guests
+                    {(() => {
+                      const parts: string[] = [];
+                      if (selection?.checkIn && selection?.checkOut) {
+                        parts.push(
+                          `${selection.checkIn} - ${selection.checkOut}`,
+                        );
+                      } else if (selection?.checkIn) {
+                        parts.push(selection.checkIn as string);
+                      } else {
+                        parts.push("Add dates");
+                      }
+
+                      if (typeof selection?.guests === "number") {
+                        parts.push(
+                          `${selection?.guests} guest${selection!.guests! > 1 ? "s" : ""}`,
+                        );
+                      } else {
+                        parts.push("Add guests");
+                      }
+
+                      return parts.join(" • ");
+                    })()}
                   </Text>
                 </View>
               </View>
 
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Filter"
-                onPress={() => console.log("Filter")}
+                accessibilityLabel="Open trip details"
+                onPress={() => router.push("/modal")}
                 style={styles.filterButton}
               >
                 <Ionicons
@@ -420,7 +442,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   columnItem: {
-    flex: 1,
+    flexBasis: "48%",
+    maxWidth: "48%",
     marginBottom: 16,
   },
 });

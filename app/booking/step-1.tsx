@@ -1,6 +1,7 @@
+import { useTrip } from "@/context/trip-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     Pressable,
     SafeAreaView,
@@ -104,6 +105,8 @@ export default function BookingStep1Screen() {
   const [checkOutInput, setCheckOutInput] = useState("");
   const [guests, setGuests] = useState(2);
 
+  const { selection } = useTrip();
+
   const calendarDays = useMemo(
     () => buildCalendarDays(displayMonth),
     [displayMonth],
@@ -194,6 +197,39 @@ export default function BookingStep1Screen() {
     applyCheckOutDate(parsed);
     setDisplayMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
   };
+
+  useEffect(() => {
+    if (!selection) return;
+    // Apply both dates directly to avoid state-update race with applyCheckOutDate/applyCheckInDate
+    if (selection.checkIn) {
+      const parsedIn = parseInputDate(selection.checkIn);
+      if (parsedIn) {
+        setCheckInDate(parsedIn);
+        setCheckInInput(formatInputDate(parsedIn));
+        setDisplayMonth(
+          new Date(parsedIn.getFullYear(), parsedIn.getMonth(), 1),
+        );
+      }
+    }
+
+    if (selection.checkOut) {
+      const parsedOut = parseInputDate(selection.checkOut);
+      if (parsedOut) {
+        setCheckOutDate(parsedOut);
+        setCheckOutInput(formatInputDate(parsedOut));
+        // if no check-in provided, show month for check-out
+        if (!selection.checkIn) {
+          setDisplayMonth(
+            new Date(parsedOut.getFullYear(), parsedOut.getMonth(), 1),
+          );
+        }
+      }
+    }
+
+    if (typeof selection.guests === "number") {
+      setGuests(selection.guests);
+    }
+  }, [selection]);
 
   const handleContinue = () => {
     router.push({

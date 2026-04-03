@@ -10,6 +10,8 @@ import { useEffect } from "react";
 import "react-native-reanimated";
 
 import { AuthProvider, useAuth } from "@/context/auth-context";
+import { SavedProvider } from "@/context/saved-context";
+import { TripProvider } from "@/context/trip-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 SplashScreen.preventAutoHideAsync();
@@ -21,7 +23,11 @@ export const unstable_settings = {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <SavedProvider>
+        <TripProvider>
+          <RootLayoutNav />
+        </TripProvider>
+      </SavedProvider>
     </AuthProvider>
   );
 }
@@ -47,7 +53,7 @@ function RootLayoutNav() {
         <Stack.Screen name="listing" options={{ headerShown: false }} />
         <Stack.Screen
           name="modal"
-          options={{ presentation: "modal", title: "Modal" }}
+          options={{ presentation: "modal", headerShown: false }}
         />
       </Stack>
       <StatusBar style="auto" />

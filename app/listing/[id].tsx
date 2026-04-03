@@ -1,3 +1,8 @@
+import {
+  fetchListingById,
+  fetchReviewsByListingId,
+} from "@/constants/firebase";
+import { useAuth } from "@/context/auth-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { Redirect, router, Stack, useLocalSearchParams } from "expo-router";
@@ -20,12 +25,6 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-
-import {
-  fetchListingById,
-  fetchReviewsByListingId,
-} from "@/constants/firebase";
-import { useAuth } from "@/context/auth-context";
 
 const COLORS = {
   bg: "#FFFFFF",
@@ -482,7 +481,12 @@ export default function ListingDetailsScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Contact host"
-                onPress={() => console.log("Contact")}
+                onPress={() =>
+                  router.push({
+                    pathname: "/contact",
+                    params: { id: details.id, hostName: details.hostName },
+                  })
+                }
                 style={({ pressed }) => [
                   styles.contactButton,
                   pressed && styles.pressed,
