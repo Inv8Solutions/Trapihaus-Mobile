@@ -4,9 +4,9 @@ import { Platform } from "react-native";
 // Web SDK (keeps web behavior working)
 import { getApp, getApps, initializeApp } from "firebase/app";
 import {
-    getAuth as getWebAuth,
-    onAuthStateChanged as onWebAuthStateChanged,
-    signOut as signOutWeb,
+  getAuth as getWebAuth,
+  onAuthStateChanged as onWebAuthStateChanged,
+  signOut as signOutWeb,
 } from "firebase/auth";
 import { getFirestore as getWebFirestore } from "firebase/firestore";
 import { getStorage as getWebStorage } from "firebase/storage";
@@ -160,6 +160,22 @@ export async function fetchReservationsForUser(uid: string) {
     collection(firestore, "reservations"),
     where("userId", "==", uid),
   );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+export async function fetchListingsByCity(city: string) {
+  if (isUsingNativeFirebase) {
+    const snapshot = await firestore
+      .collection("listings")
+      .where("city", "==", city)
+      .get();
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+  }
+
+  const { collection, getDocs, query, where } =
+    await import("firebase/firestore");
+  const q = query(collection(firestore, "listings"), where("city", "==", city));
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }

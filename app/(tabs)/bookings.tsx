@@ -17,6 +17,9 @@ import { useAuth } from "@/context/auth-context";
 export default function BookingsScreen() {
   const { isSignedIn } = useAuth();
   const [reservations, setReservations] = useState<any[] | null>(null);
+  const [selectedTab, setSelectedTab] = useState<
+    "ongoing" | "completed" | "cancelled"
+  >("ongoing");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +56,49 @@ export default function BookingsScreen() {
       mounted = false;
     };
   }, [isSignedIn]);
+
+  // memoized filtered reservations based on selectedTab to avoid recalculating on every render
+  const filteredReservations = React.useMemo(() => {
+    if (!reservations) return [];
+
+    const tab = selectedTab;
+
+    const normalize = (s: any) => String(s ?? "").toLowerCase();
+
+    if (tab === "completed") {
+      return reservations.filter((r) => {
+        const st = normalize(r.status ?? r.bookingStatus);
+        return (
+          st.includes("complete") ||
+          st.includes("finished") ||
+          st.includes("done")
+        );
+      });
+    }
+
+    if (tab === "cancelled") {
+      return reservations.filter((r) => {
+        const st = normalize(
+          r.status ?? r.bookingStatus ?? r.payment_state ?? "",
+        );
+        return st.includes("cancel") || st.includes("void");
+      });
+    }
+
+    // ongoing: anything that's not completed or cancelled
+    return reservations.filter((r) => {
+      const st = normalize(r.status ?? r.bookingStatus ?? "");
+      if (!st) return true;
+      if (st.includes("cancel") || st.includes("void")) return false;
+      if (
+        st.includes("complete") ||
+        st.includes("finished") ||
+        st.includes("done")
+      )
+        return false;
+      return true;
+    });
+  }, [reservations, selectedTab]);
 
   function formatToDate(value: any) {
     if (value == null || value === "") return "-";
@@ -98,14 +144,53 @@ export default function BookingsScreen() {
         <Text style={styles.headerSubtitle}>Manage your reservations</Text>
 
         <View style={styles.tabRow}>
-          <Pressable style={[styles.tabPill, styles.tabPillActive]}>
-            <Text style={[styles.tabText, styles.tabTextActive]}>Ongoing</Text>
+          <Pressable
+            style={[
+              styles.tabPill,
+              selectedTab === "ongoing" && styles.tabPillActive,
+            ]}
+            onPress={() => setSelectedTab("ongoing")}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                selectedTab === "ongoing" && styles.tabTextActive,
+              ]}
+            >
+              Ongoing
+            </Text>
           </Pressable>
-          <Pressable style={styles.tabPill}>
-            <Text style={styles.tabText}>Completed</Text>
+          <Pressable
+            style={[
+              styles.tabPill,
+              selectedTab === "completed" && styles.tabPillActive,
+            ]}
+            onPress={() => setSelectedTab("completed")}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                selectedTab === "completed" && styles.tabTextActive,
+              ]}
+            >
+              Completed
+            </Text>
           </Pressable>
-          <Pressable style={styles.tabPill}>
-            <Text style={styles.tabText}>Cancelled</Text>
+          <Pressable
+            style={[
+              styles.tabPill,
+              selectedTab === "cancelled" && styles.tabPillActive,
+            ]}
+            onPress={() => setSelectedTab("cancelled")}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                selectedTab === "cancelled" && styles.tabTextActive,
+              ]}
+            >
+              Cancelled
+            </Text>
           </Pressable>
         </View>
 
@@ -114,85 +199,63 @@ export default function BookingsScreen() {
         ) : error ? (
           <Text style={{ color: "#D93025", marginTop: 12 }}>{error}</Text>
         ) : reservations && reservations.length ? (
-          <FlatList
-            data={reservations}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
-              const propertyName = item.propertyName ?? item.listingName ?? "-";
-              const propertyLocation =
-                item.propertyLocation ?? item.location ?? item.address ?? "-";
+          filteredReservations && filteredReservations.length ? (
+            <FlatList
+              data={filteredReservations}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => {
+                const propertyName =
+                  item.propertyName ?? item.listingName ?? "-";
+                const propertyLocation =
+                  item.propertyLocation ?? item.location ?? item.address ?? "-";
 
-              // Render total exactly as stored in Firestore. Prefer `total` field, fall back to common alternatives.
-              const totalRaw = Object.prototype.hasOwnProperty.call(
-                item,
-                "total",
-              )
-                ? item.total
-                : Object.prototype.hasOwnProperty.call(item, "amount")
-                  ? item.amount
-                  : (item.amountPaid ?? item.amount_total ?? "-");
+                // Render total exactly as stored in Firestore. Prefer `total` field, fall back to common alternatives.
+                const totalRaw = Object.prototype.hasOwnProperty.call(
+                  item,
+                  "total",
+                )
+                  ? item.total
+                  : Object.prototype.hasOwnProperty.call(item, "amount")
+                    ? item.amount
+                    : (item.amountPaid ?? item.amount_total ?? "-");
 
-              const status = item.status ?? item.bookingStatus ?? "-";
-              const checkIn = formatToDate(
-                item.checkInDate ?? item.checkIn ?? "-",
-              );
-              const checkOut = formatToDate(
-                item.checkOutDate ?? item.checkOut ?? "-",
-              );
-              const paymentStatus =
-                item.paymentStatus ?? item.payment_state ?? "-";
+                const status = item.status ?? item.bookingStatus ?? "-";
+                const checkIn = formatToDate(
+                  item.checkInDate ?? item.checkIn ?? "-",
+                );
+                const checkOut = formatToDate(
+                  item.checkOutDate ?? item.checkOut ?? "-",
+                );
+                const paymentStatus =
+                  item.paymentStatus ?? item.payment_state ?? "-";
 
-              // try to find an image (prefer `propertyImage` if available)
-              const imageUrl =
-                item.propertyImage ??
-                item.listingImage ??
-                item.imageUrl ??
-                item.coverPhoto ??
-                (Array.isArray(item.photos) ? item.photos[0] : undefined) ??
-                (item.image && item.image.uri) ??
-                null;
+                // try to find an image (prefer `propertyImage` if available)
+                const imageUrl =
+                  item.propertyImage ??
+                  item.listingImage ??
+                  item.imageUrl ??
+                  item.coverPhoto ??
+                  (Array.isArray(item.photos) ? item.photos[0] : undefined) ??
+                  (item.image && item.image.uri) ??
+                  null;
 
-              return (
-                <View style={styles.card}>
-                  <View style={styles.cardRow}>
-                    <View style={styles.thumbWrap}>
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: String(imageUrl) }}
-                          style={styles.thumb}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        <View style={styles.thumbPlaceholder} />
-                      )}
-                    </View>
-
-                    <View style={styles.cardBody}>
-                      <Text style={styles.rowTitle}>{propertyName}</Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <Ionicons
-                          name="location-sharp"
-                          size={14}
-                          color="#6B7785"
-                        />
-                        <Text style={styles.rowSub}>{propertyLocation}</Text>
+                return (
+                  <View style={styles.card}>
+                    <View style={styles.cardRow}>
+                      <View style={styles.thumbWrap}>
+                        {imageUrl ? (
+                          <Image
+                            source={{ uri: String(imageUrl) }}
+                            style={styles.thumb}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <View style={styles.thumbPlaceholder} />
+                        )}
                       </View>
 
-                      <View style={{ height: 8 }} />
-
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          gap: 12,
-                          alignItems: "center",
-                        }}
-                      >
+                      <View style={styles.cardBody}>
+                        <Text style={styles.rowTitle}>{propertyName}</Text>
                         <View
                           style={{
                             flexDirection: "row",
@@ -201,63 +264,94 @@ export default function BookingsScreen() {
                           }}
                         >
                           <Ionicons
-                            name="calendar-outline"
+                            name="location-sharp"
                             size={14}
                             color="#6B7785"
                           />
-                          <Text style={styles.rowSub}>
-                            {checkIn} — {checkOut}
-                          </Text>
+                          <Text style={styles.rowSub}>{propertyLocation}</Text>
                         </View>
+
+                        <View style={{ height: 8 }} />
 
                         <View
                           style={{
                             flexDirection: "row",
+                            gap: 12,
                             alignItems: "center",
-                            gap: 6,
                           }}
                         >
-                          <Ionicons name="person" size={14} color="#6B7785" />
-                          <Text style={styles.rowSub}>
-                            {String(item.guests ?? item.guestCount ?? "-")}
-                          </Text>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <Ionicons
+                              name="calendar-outline"
+                              size={14}
+                              color="#6B7785"
+                            />
+                            <Text style={styles.rowSub}>
+                              {checkIn} — {checkOut}
+                            </Text>
+                          </View>
+
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <Ionicons name="person" size={14} color="#6B7785" />
+                            <Text style={styles.rowSub}>
+                              {String(item.guests ?? item.guestCount ?? "-")}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.actionsRow}>
+                          <Pressable style={styles.actionBtn}>
+                            <Text style={styles.actionText}>Message Host</Text>
+                          </Pressable>
+                          <Pressable style={styles.actionBtn}>
+                            <Text style={styles.actionText}>Call</Text>
+                          </Pressable>
                         </View>
                       </View>
+                    </View>
 
-                      <View style={styles.actionsRow}>
-                        <Pressable style={styles.actionBtn}>
-                          <Text style={styles.actionText}>Message Host</Text>
-                        </Pressable>
-                        <Pressable style={styles.actionBtn}>
-                          <Text style={styles.actionText}>Call</Text>
-                        </Pressable>
-                      </View>
+                    <View style={styles.divider} />
+
+                    <View style={styles.footerRow}>
+                      <Text style={styles.metaLabel}>Total</Text>
+                      <Text style={styles.totalValue}>
+                        {typeof totalRaw === "object"
+                          ? JSON.stringify(totalRaw)
+                          : String(totalRaw)}
+                      </Text>
+                    </View>
+
+                    <View style={styles.footerActions}>
+                      <Pressable style={styles.outlineBtn}>
+                        <Text style={styles.outlineText}>Cancel Booking</Text>
+                      </Pressable>
+                      <Pressable style={styles.primaryBtn}>
+                        <Text style={styles.primaryText}>
+                          View Accommodation
+                        </Text>
+                      </Pressable>
                     </View>
                   </View>
-
-                  <View style={styles.divider} />
-
-                  <View style={styles.footerRow}>
-                    <Text style={styles.metaLabel}>Total</Text>
-                    <Text style={styles.totalValue}>
-                      {typeof totalRaw === "object"
-                        ? JSON.stringify(totalRaw)
-                        : String(totalRaw)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.footerActions}>
-                    <Pressable style={styles.outlineBtn}>
-                      <Text style={styles.outlineText}>Cancel Booking</Text>
-                    </Pressable>
-                    <Pressable style={styles.primaryBtn}>
-                      <Text style={styles.primaryText}>View Accommodation</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            }}
-          />
+                );
+              }}
+            />
+          ) : (
+            <Text style={{ marginTop: 12, color: "#6B7785" }}>
+              No bookings found for this filter.
+            </Text>
+          )
         ) : (
           <Text style={{ marginTop: 12, color: "#6B7785" }}>
             {isSignedIn

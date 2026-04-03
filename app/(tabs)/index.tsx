@@ -17,7 +17,10 @@ import {
 
 import { CategoryPills } from "@/components/home/category-pills";
 import { ListingCard, type Listing } from "@/components/home/listing-card";
-import { fetchListingsCollection } from "@/constants/firebase";
+import {
+  fetchListingsByCity,
+  fetchListingsCollection,
+} from "@/constants/firebase";
 import { useSaved } from "@/context/saved-context";
 import { useTrip } from "@/context/trip-context";
 import { router } from "expo-router";
@@ -37,11 +40,100 @@ export default function HomeScreen() {
   const { map: saved, toggle } = useSaved();
   const { selection } = useTrip();
 
+  // When the user sets a location (e.g. "Banaue, Ifugao"), fetch listings for that city
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        if (!selection?.location) return;
+        setIsLoading(true);
+        setLoadError(null);
+
+        const city = String(selection.location).split(",")[0].trim();
+        if (!city) return;
+
+        const rows = await fetchListingsByCity(city);
+        const normalized = rows.map((row: any) => {
+          const imageUrl =
+            row.coverPhoto ??
+            (Array.isArray(row.photos) ? row.photos[0] : undefined) ??
+            row.imageUrl ??
+            row.image ??
+            row.thumbnailUrl ??
+            (Array.isArray(row.images) ? row.images[0] : undefined);
+
+          const rawPrice = row.rate;
+          let price = "N/A";
+          if (typeof rawPrice === "number") {
+            price = `PHP ${rawPrice.toLocaleString()}`;
+          } else if (typeof rawPrice === "string" && rawPrice.trim().length) {
+            const parsed = Number(rawPrice);
+            price = Number.isNaN(parsed)
+              ? rawPrice
+              : `PHP ${parsed.toLocaleString()}`;
+          }
+
+          const barangay =
+            typeof row.barangay === "string" ? row.barangay.trim() : "";
+          const cityVal = typeof row.city === "string" ? row.city.trim() : "";
+          const location = [barangay, cityVal].filter(Boolean).join(", ");
+
+          const rawCategory =
+            typeof row.propertyType === "string"
+              ? row.propertyType.toLowerCase()
+              : "";
+          let normalizedCategory: DashboardListing["category"];
+          if (rawCategory === "hotel" || rawCategory === "hotels")
+            normalizedCategory = "Hotels";
+          else if (rawCategory === "apartment" || rawCategory === "apartments")
+            normalizedCategory = "Apartments";
+          else if (rawCategory === "transient" || rawCategory === "transients")
+            normalizedCategory = "Transients";
+
+          const item: DashboardListing = {
+            id: String(row.id),
+            title: row.propertyName ?? "Untitled listing",
+            subtitle: location || "Location unavailable",
+            price,
+            period:
+              (typeof row.ratePeriod === "string"
+                ? row.ratePeriod.replace(/^per\s+/i, "")
+                : row.ratePeriod) ?? "night",
+            verified: String(row.status ?? "").toLowerCase() === "approved",
+            category: normalizedCategory,
+            image: imageUrl
+              ? { uri: String(imageUrl) }
+              : require("@/assets/images/react-logo.png"),
+          };
+
+          return item;
+        });
+
+        if (!isMounted) return;
+        setListings(normalized);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error("Failed to fetch listings by city", error);
+        setLoadError("Could not load listings for the selected location.");
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selection?.location]);
+
   useEffect(() => {
     let isMounted = true;
 
     (async () => {
       try {
+        // If a location is selected, avoid fetching the full collection here
+        // to prevent overwriting location-specific results fetched elsewhere.
+        if (selection?.location) return;
+
         setIsLoading(true);
         setLoadError(null);
 
@@ -176,7 +268,7 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Change location"
-                onPress={() => console.log("Location")}
+                onPress={() => router.push("/location")}
                 style={styles.locationWrap}
               >
                 <Text style={styles.locationLabel}>Location</Text>
@@ -186,7 +278,9 @@ export default function HomeScreen() {
                     size={14}
                     color={COLORS.text}
                   />
-                  <Text style={styles.locationValue}>Baguio City</Text>
+                  <Text style={styles.locationValue}>
+                    {selection?.location ?? "Baguio City"}
+                  </Text>
                   <Ionicons
                     name="chevron-down"
                     size={16}

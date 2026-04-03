@@ -6,6 +6,7 @@ type TripSelection = {
   checkIn?: string | null;
   checkOut?: string | null;
   guests?: number;
+  location?: string | null;
 };
 
 type TripContextValue = {

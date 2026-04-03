@@ -2,17 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import {
-    SafeAreaView,
-    useSafeAreaInsets,
+  SafeAreaView,
+  useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
 import { AuthTextInput } from "@/components/auth/auth-text-input";
@@ -125,7 +125,7 @@ export default function RegisterScreen() {
                   setError("Invalid credentials. Use admin / admin.");
                   return;
                 }
-                router.replace("/(tabs)/index");
+                router.replace("/(tabs)");
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
