@@ -35,6 +35,7 @@ export default function HomeScreen() {
     "Hotels" | "Apartments" | "Transients"
   >("Hotels");
   const [listings, setListings] = useState<DashboardListing[]>([]);
+  const [allListings, setAllListings] = useState<DashboardListing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const { map: saved, toggle } = useSaved();
@@ -130,10 +131,6 @@ export default function HomeScreen() {
 
     (async () => {
       try {
-        // If a location is selected, avoid fetching the full collection here
-        // to prevent overwriting location-specific results fetched elsewhere.
-        if (selection?.location) return;
-
         setIsLoading(true);
         setLoadError(null);
 
@@ -202,7 +199,9 @@ export default function HomeScreen() {
         });
 
         if (!isMounted) return;
-        setListings(normalized);
+        setAllListings(normalized);
+        // only set visible listings when there's no active location filter
+        if (!selection?.location) setListings(normalized);
       } catch (error) {
         if (!isMounted) return;
         console.error("Failed to fetch listings", error);
@@ -216,6 +215,93 @@ export default function HomeScreen() {
       isMounted = false;
     };
   }, []);
+
+  // Apply client-side filtering when a location is set. This filters the cached
+  // `allListings` first (to avoid unnecessary network calls) and falls back to
+  // a server query if there are no local matches.
+  useEffect(() => {
+    if (!selection?.location) {
+      // restore full list when location is cleared
+      setListings(allListings);
+      return;
+    }
+
+    const rawCity = String(selection.location).split(",")[0].trim();
+    const city = rawCity.toLowerCase().replace(/\s+city$/, "").trim();
+
+    const localMatches = allListings.filter((item) => {
+      const subtitle = (item.subtitle ?? "").toString().toLowerCase();
+      return subtitle.includes(city);
+    });
+
+    if (localMatches.length) {
+      setListings(localMatches);
+      return;
+    }
+
+    // Fallback to server query when there are no local matches
+    let mounted = true;
+    (async () => {
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        const rows = await fetchListingsByCity(rawCity);
+        const normalized = rows.map((row: any) => {
+          const imageUrl =
+            row.coverPhoto ??
+            (Array.isArray(row.photos) ? row.photos[0] : undefined) ??
+            row.imageUrl ??
+            row.image ??
+            row.thumbnailUrl ??
+            (Array.isArray(row.images) ? row.images[0] : undefined);
+
+          const rawPrice = row.rate;
+          let price = "N/A";
+          if (typeof rawPrice === "number") {
+            price = `PHP ${rawPrice.toLocaleString()}`;
+          } else if (typeof rawPrice === "string" && rawPrice.trim().length) {
+            const parsed = Number(rawPrice);
+            price = Number.isNaN(parsed) ? rawPrice : `PHP ${parsed.toLocaleString()}`;
+          }
+
+          const barangay = typeof row.barangay === "string" ? row.barangay.trim() : "";
+          const cityVal = typeof row.city === "string" ? row.city.trim() : "";
+          const location = [barangay, cityVal].filter(Boolean).join(", ");
+
+          const rawCategory = typeof row.propertyType === "string" ? row.propertyType.toLowerCase() : "";
+          let normalizedCategory: DashboardListing["category"];
+          if (rawCategory === "hotel" || rawCategory === "hotels") normalizedCategory = "Hotels";
+          else if (rawCategory === "apartment" || rawCategory === "apartments") normalizedCategory = "Apartments";
+          else if (rawCategory === "transient" || rawCategory === "transients") normalizedCategory = "Transients";
+
+          const item: DashboardListing = {
+            id: String(row.id),
+            title: row.propertyName ?? "Untitled listing",
+            subtitle: location || "Location unavailable",
+            price,
+            period: (typeof row.ratePeriod === "string" ? row.ratePeriod.replace(/^per\s+/i, "") : row.ratePeriod) ?? "night",
+            verified: String(row.status ?? "").toLowerCase() === "approved",
+            category: normalizedCategory,
+            image: imageUrl ? { uri: String(imageUrl) } : require("@/assets/images/react-logo.png"),
+          };
+
+          return item;
+        });
+
+        if (!mounted) return;
+        setListings(normalized);
+      } catch (err) {
+        console.error("Failed to fetch listings by city", err);
+        setLoadError("Could not load listings for the selected location.");
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [selection?.location, allListings]);
 
   const data = useMemo(() => {
     return listings.filter(
