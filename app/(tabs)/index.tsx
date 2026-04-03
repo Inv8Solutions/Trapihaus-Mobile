@@ -18,9 +18,12 @@ import {
 import { CategoryPills } from "@/components/home/category-pills";
 import { ListingCard, type Listing } from "@/components/home/listing-card";
 import {
+  auth,
   fetchListingsByCity,
   fetchListingsCollection,
+  fetchNotificationsForUser,
 } from "@/constants/firebase";
+import { useAuth } from "@/context/auth-context";
 import { useSaved } from "@/context/saved-context";
 import { useTrip } from "@/context/trip-context";
 import { router } from "expo-router";
@@ -40,8 +43,33 @@ export default function HomeScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const { map: saved, toggle } = useSaved();
   const { selection } = useTrip();
+  const { isSignedIn } = useAuth();
+  const [notifCount, setNotifCount] = useState<number>(0);
 
   // When the user sets a location (e.g. "Banaue, Ifugao"), fetch listings for that city
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const uid = (auth && (auth.currentUser as any)?.uid) || null;
+        if (!uid) {
+          if (mounted) setNotifCount(0);
+          return;
+        }
+
+        const rows = await fetchNotificationsForUser(uid);
+        if (!mounted) return;
+        setNotifCount(Array.isArray(rows) ? rows.length : 0);
+      } catch (err) {
+        console.error("Failed to fetch notifications", err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [isSignedIn]);
+
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -227,7 +255,10 @@ export default function HomeScreen() {
     }
 
     const rawCity = String(selection.location).split(",")[0].trim();
-    const city = rawCity.toLowerCase().replace(/\s+city$/, "").trim();
+    const city = rawCity
+      .toLowerCase()
+      .replace(/\s+city$/, "")
+      .trim();
 
     const localMatches = allListings.filter((item) => {
       const subtitle = (item.subtitle ?? "").toString().toLowerCase();
@@ -261,28 +292,42 @@ export default function HomeScreen() {
             price = `PHP ${rawPrice.toLocaleString()}`;
           } else if (typeof rawPrice === "string" && rawPrice.trim().length) {
             const parsed = Number(rawPrice);
-            price = Number.isNaN(parsed) ? rawPrice : `PHP ${parsed.toLocaleString()}`;
+            price = Number.isNaN(parsed)
+              ? rawPrice
+              : `PHP ${parsed.toLocaleString()}`;
           }
 
-          const barangay = typeof row.barangay === "string" ? row.barangay.trim() : "";
+          const barangay =
+            typeof row.barangay === "string" ? row.barangay.trim() : "";
           const cityVal = typeof row.city === "string" ? row.city.trim() : "";
           const location = [barangay, cityVal].filter(Boolean).join(", ");
 
-          const rawCategory = typeof row.propertyType === "string" ? row.propertyType.toLowerCase() : "";
+          const rawCategory =
+            typeof row.propertyType === "string"
+              ? row.propertyType.toLowerCase()
+              : "";
           let normalizedCategory: DashboardListing["category"];
-          if (rawCategory === "hotel" || rawCategory === "hotels") normalizedCategory = "Hotels";
-          else if (rawCategory === "apartment" || rawCategory === "apartments") normalizedCategory = "Apartments";
-          else if (rawCategory === "transient" || rawCategory === "transients") normalizedCategory = "Transients";
+          if (rawCategory === "hotel" || rawCategory === "hotels")
+            normalizedCategory = "Hotels";
+          else if (rawCategory === "apartment" || rawCategory === "apartments")
+            normalizedCategory = "Apartments";
+          else if (rawCategory === "transient" || rawCategory === "transients")
+            normalizedCategory = "Transients";
 
           const item: DashboardListing = {
             id: String(row.id),
             title: row.propertyName ?? "Untitled listing",
             subtitle: location || "Location unavailable",
             price,
-            period: (typeof row.ratePeriod === "string" ? row.ratePeriod.replace(/^per\s+/i, "") : row.ratePeriod) ?? "night",
+            period:
+              (typeof row.ratePeriod === "string"
+                ? row.ratePeriod.replace(/^per\s+/i, "")
+                : row.ratePeriod) ?? "night",
             verified: String(row.status ?? "").toLowerCase() === "approved",
             category: normalizedCategory,
-            image: imageUrl ? { uri: String(imageUrl) } : require("@/assets/images/react-logo.png"),
+            image: imageUrl
+              ? { uri: String(imageUrl) }
+              : require("@/assets/images/react-logo.png"),
           };
 
           return item;
@@ -378,7 +423,7 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Notifications"
-                onPress={() => console.log("Notifications")}
+                onPress={() => router.push("/notifications")}
                 style={styles.bellButton}
               >
                 <Ionicons
@@ -386,6 +431,13 @@ export default function HomeScreen() {
                   size={20}
                   color={COLORS.text}
                 />
+                {notifCount > 0 ? (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>
+                      {notifCount > 99 ? "99+" : String(notifCount)}
+                    </Text>
+                  </View>
+                ) : null}
               </Pressable>
             </View>
 
@@ -626,4 +678,17 @@ const styles = StyleSheet.create({
     maxWidth: "48%",
     marginBottom: 16,
   },
+  badge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#FF3B30",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  badgeText: { color: "#fff", fontSize: 10, fontWeight: "900" },
 });

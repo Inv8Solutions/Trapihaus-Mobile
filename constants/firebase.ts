@@ -180,6 +180,28 @@ export async function fetchListingsByCity(city: string) {
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
+export async function fetchNotificationsForUser(uid: string) {
+  if (isUsingNativeFirebase) {
+    const snapshot = await firestore
+      .collection("notifications")
+      .where("userId", "==", uid)
+      .where("seen", "==", false)
+      .get();
+
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+  }
+
+  const { collection, getDocs, query, where } =
+    await import("firebase/firestore");
+  const q = query(
+    collection(firestore, "notifications"),
+    where("userId", "==", uid),
+    where("seen", "==", false),
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
 export { app, auth, firebaseConfig, firestore, isUsingNativeFirebase, storage };
 
 /*
