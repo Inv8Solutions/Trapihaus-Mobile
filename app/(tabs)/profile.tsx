@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
-import React from "react";
+import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
   Pressable,
   SafeAreaView,
@@ -10,18 +12,236 @@ import {
   View,
 } from "react-native";
 
+import {
+  auth as firebaseAuth,
+  firestore,
+  isUsingNativeFirebase,
+} from "@/constants/firebase";
 import { useAuth } from "@/context/auth-context";
 
 export default function ProfileScreen() {
-  const { signOut, user } = useAuth() as any;
+  const { signOut } = useAuth() as any;
 
-  const name = user?.displayName ?? "Juan Dela Cruz";
-  const email = user?.email ?? "juan.delacruz@email.com";
+  const [currentUser, setCurrentUser] = useState<any>(
+    typeof firebaseAuth !== "undefined" ? firebaseAuth.currentUser : null,
+  );
+
+  useEffect(() => {
+    let unsub: any;
+    try {
+      if (isUsingNativeFirebase && firebaseAuth?.onAuthStateChanged) {
+        unsub = firebaseAuth.onAuthStateChanged((u: any) => setCurrentUser(u));
+      } else {
+        // web SDK
+        // dynamic import to avoid bundling firebase on native
+        (async () => {
+          const { onAuthStateChanged } = await import("firebase/auth");
+          unsub = onAuthStateChanged(firebaseAuth, (u) => setCurrentUser(u));
+        })();
+      }
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      if (typeof unsub === "function") unsub();
+      if (unsub && typeof unsub === "object" && unsub.unsubscribe)
+        unsub.unsubscribe();
+    };
+  }, []);
+
+  const name = currentUser?.displayName ?? "Juan Dela Cruz";
+  const email = currentUser?.email ?? "juan.delacruz@email.com";
+
+  const [dbName, setDbName] = useState<string | null>(null);
+
+  const PROFILE_KEY = (uid: string) => `user_profile_v1_${uid}`;
+
+  async function readCachedName(uid: string) {
+    try {
+      const raw = await AsyncStorage.getItem(PROFILE_KEY(uid));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.fullName ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function writeCachedName(uid: string, fullName: string) {
+    try {
+      await AsyncStorage.setItem(
+        PROFILE_KEY(uid),
+        JSON.stringify({ fullName }),
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  async function removeCachedName(uid: string) {
+    try {
+      await AsyncStorage.removeItem(PROFILE_KEY(uid));
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    let mounted = true;
+    async function fetchNameForUser() {
+      const uid = currentUser?.uid;
+      if (!uid) return;
+
+      // try cached value first
+      const cached = await readCachedName(uid);
+      if (cached) {
+        if (mounted) setDbName(cached);
+        // still attempt a fresh fetch in background
+      }
+
+      try {
+        if (isUsingNativeFirebase) {
+          const snapshot = await firestore.collection("users").get();
+          for (const doc of snapshot.docs) {
+            const data = doc.data();
+            if (data?.uid === uid) {
+              const first = data.firstName ?? "";
+              const last = data.lastName ?? "";
+              const full = `${first} ${last}`.trim();
+              if (mounted) setDbName(full);
+              await writeCachedName(uid, full);
+              return;
+            }
+          }
+        } else {
+          const { collection, getDocs, query, where } =
+            await import("firebase/firestore");
+          const q = query(
+            collection(firestore, "users"),
+            where("uid", "==", uid),
+          );
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            const data: any = doc.data();
+            const first = data?.firstName ?? "";
+            const last = data?.lastName ?? "";
+            const full = `${first} ${last}`.trim();
+            if (mounted) setDbName(full);
+            await writeCachedName(uid, full);
+          }
+        }
+      } catch (e) {
+        // ignore errors silently for now
+      }
+    }
+
+    fetchNameForUser();
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser?.uid]);
+
+  const [bookingsCount, setBookingsCount] = useState<number | null>(null);
+  const [reviewsCount, setReviewsCount] = useState<number | null>(null);
+  const [avgRating, setAvgRating] = useState<number | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function fetchStats() {
+      const uid = currentUser?.uid;
+      if (!uid) return;
+
+      try {
+        if (isUsingNativeFirebase) {
+          const resSnap = await firestore
+            .collection("reservations")
+            .where("userId", "==", uid)
+            .get();
+          const reservationsCount = resSnap.docs.length;
+
+          const revSnap = await firestore
+            .collection("reviews")
+            .where("userId", "==", uid)
+            .get();
+          const rCount = revSnap.docs.length;
+
+          // compute average rating from review docs if present
+          let sum = 0;
+          let cnt = 0;
+          for (const d of revSnap.docs) {
+            const data = d.data();
+            const val = data?.rating ?? data?.score ?? null;
+            const num = val != null ? Number(val) : NaN;
+            if (!Number.isNaN(num)) {
+              sum += num;
+              cnt += 1;
+            }
+          }
+          const average = cnt > 0 ? +(sum / cnt) : null;
+
+          if (mounted) {
+            setBookingsCount(reservationsCount);
+            setReviewsCount(rCount);
+            setAvgRating(average);
+          }
+        } else {
+          const { collection, getDocs, query, where } =
+            await import("firebase/firestore");
+
+          const qRes = query(
+            collection(firestore, "reservations"),
+            where("userId", "==", uid),
+          );
+          const resSnap = await getDocs(qRes);
+          const reservationsCount = resSnap.docs.length;
+
+          const qRev = query(
+            collection(firestore, "reviews"),
+            where("userId", "==", uid),
+          );
+          const revSnap = await getDocs(qRev);
+          const rCount = revSnap.docs.length;
+
+          let sum = 0;
+          let cnt = 0;
+          for (const d of revSnap.docs) {
+            const data: any = d.data();
+            const val = data?.rating ?? data?.score ?? null;
+            const num = val != null ? Number(val) : NaN;
+            if (!Number.isNaN(num)) {
+              sum += num;
+              cnt += 1;
+            }
+          }
+          const average = cnt > 0 ? +(sum / cnt) : null;
+
+          if (mounted) {
+            setBookingsCount(reservationsCount);
+            setReviewsCount(rCount);
+            setAvgRating(average);
+          }
+        }
+      } catch (e) {
+        // ignore for now
+      }
+    }
+
+    fetchStats();
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser?.uid]);
 
   const stats = [
-    { id: "bookings", label: "Bookings", value: 12 },
-    { id: "reviews", label: "Reviews", value: 8 },
-    { id: "rating", label: "Rating", value: "4.8" },
+    { id: "bookings", label: "Bookings", value: bookingsCount ?? "-" },
+    { id: "reviews", label: "Reviews", value: reviewsCount ?? "-" },
+    {
+      id: "rating",
+      label: "Rating",
+      value: avgRating != null ? avgRating.toFixed(1) : "-",
+    },
   ];
 
   const items = [
@@ -30,32 +250,38 @@ export default function ProfileScreen() {
       title: "Notifications",
       subtitle: "Manage your notifications",
       icon: "notifications-outline",
+      path: "/notifications",
     },
     {
       id: "privacy",
       title: "Privacy & Security",
       subtitle: "Password, 2FA settings",
       icon: "lock-closed-outline",
+      path: "/privacy",
     },
     {
       id: "payments",
       title: "Payment Methods",
       subtitle: "Manage cards and wallets",
       icon: "card-outline",
+      path: "/payments",
     },
     {
       id: "reviews",
       title: "Reviews",
       subtitle: "Your reviews and ratings",
       icon: "star-outline",
+      path: "/reviews",
     },
     {
       id: "help",
       title: "Help Center",
       subtitle: "Get support",
       icon: "help-circle-outline",
+      path: "/help",
     },
   ];
+  const router = useRouter();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -71,7 +297,7 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.userInfo}>
-              <Text style={styles.name}>{name}</Text>
+              <Text style={styles.name}>{dbName ?? name}</Text>
               <Text style={styles.email}>{email}</Text>
             </View>
           </View>
@@ -100,7 +326,11 @@ export default function ProfileScreen() {
 
         <View style={styles.listSection}>
           {items.map((it) => (
-            <Pressable key={it.id} style={styles.listItem}>
+            <Pressable
+              key={it.id}
+              style={styles.listItem}
+              onPress={() => it.path && router.push(it.path as any)}
+            >
               <View style={styles.itemLeft}>
                 <View style={styles.iconWrap}>
                   <Ionicons name={it.icon as any} size={20} color="#1877CD" />
